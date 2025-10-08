@@ -12,6 +12,8 @@ import { NostrLoginProvider } from '@nostrify/react/login';
 import { AppProvider } from '@/components/AppProvider';
 import { NWCProvider } from '@/contexts/NWCContext';
 import { AppConfig } from '@/contexts/AppContext';
+import { VoipProvider } from '@/components/voip/VoipProvider';
+import { VoipMissedCallManager } from '@/components/voip/VoipMissedCallToast';
 import AppRouter from './AppRouter';
 
 const head = createHead({
@@ -50,12 +52,15 @@ export function App() {
           <NostrLoginProvider storageKey='nostr:login'>
             <NostrProvider>
               <NWCProvider>
-                <TooltipProvider>
-                  <Toaster />
-                  <Suspense>
-                    <AppRouter />
-                  </Suspense>
-                </TooltipProvider>
+                <VoipProvider>
+                  <TooltipProvider>
+                    <Toaster />
+                    <VoipMissedCallManager />
+                    <Suspense>
+                      <AppRouter />
+                    </Suspense>
+                  </TooltipProvider>
+                </VoipProvider>
               </NWCProvider>
             </NostrProvider>
           </NostrLoginProvider>
