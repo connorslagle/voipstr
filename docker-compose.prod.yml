@@ -1,0 +1,192 @@
+version: '3.8'
+
+services:
+  # Production VOIP application
+  voip-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: nostr-voip:latest
+    container_name: nostr-voip-prod
+    ports:
+      - "8080:8080"
+      - "8443:443"
+    environment:
+      - NODE_ENV=production
+      - VITE_DEFAULT_RELAY=wss://relay.nostr.band
+      - VITE_STUN_SERVER=stun:stun.l.google.com:19302
+      - VITE_TURN_SERVER=turn:turn-server:3478
+      - VITE_TURN_USERNAME=${TURN_USERNAME:-voip-user}
+      - VITE_TURN_CREDENTIAL=${TURN_CREDENTIAL:-voip-secret}
+      - VITE_HTTPS=true
+    volumes:
+      - ssl_certs:/etc/ssl:ro
+      - nginx_logs:/var/log/nginx
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8443/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - turn-server
+      - redis
+    networks:
+      - voip-prod-network
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 0
+        order: stop-first
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: nostr-voip-redis-prod
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - redis_config:/etc/redis/redis.conf
+    command: redis-server /etc/redis/redis.conf
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis-secret}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - voip-prod-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.2'
+          memory: 128M
+
+  # Production TURN server with TLS
+  turn-server:
+    image: instrumentisto/coturn:latest
+    container_name: nostr-voip-turn-prod
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/tcp"
+      - "5349:5349/udp"
+      - "49152-65535:49152-65535/udp"
+    volumes:
+      - turn_config:/etc/coturn
+      - ssl_certs:/etc/ssl:ro
+      - turn_logs:/var/log/turnserver
+    environment:
+      - TURN_USERNAME=${TURN_USERNAME:-voip-user}
+      - TURN_CREDENTIAL=${TURN_CREDENTIAL:-voip-secret}
+      - REALM=nostr-voip.com
+      - EXTERNAL_IP=${EXTERNAL_IP:-auto}
+    command: >
+      /bin/sh -c "
+        echo 'user=$$TURN_USERNAME:$$TURN_CREDENTIAL' > /tmp/turnusers.txt &&
+        echo 'realm=nostr-voip.com' >> /tmp/turnusers.txt &&
+        turnserver -c /etc/coturn/turnserver.conf --userdb=/tmp/turnusers.txt
+      "
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3478"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - voip-prod-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Nginx load balancer (optional)
+  nginx-lb:
+    image: nginx:alpine
+    container_name: nostr-voip-lb
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - nginx_lb_config:/etc/nginx/conf.d
+      - ssl_certs:/etc/ssl:ro
+    depends_on:
+      - voip-app
+    restart: unless-stopped
+    networks:
+      - voip-prod-network
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+
+  # Log aggregation (optional)
+  fluentd:
+    image: fluent/fluentd:v1.16-1
+    container_name: nostr-voip-logs
+    volumes:
+      - fluentd_config:/fluentd/etc
+      - nginx_logs:/var/log/nginx:ro
+      - turn_logs:/var/log/turnserver:ro
+      - app_logs:/app/logs:ro
+    environment:
+      - FLUENTD_CONF=fluent.conf
+    networks:
+      - voip-prod-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  voip-prod-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  ssl_certs:
+    driver: local
+  redis_data:
+    driver: local
+  redis_config:
+    driver: local
+  turn_config:
+    driver: local
+  nginx_logs:
+    driver: local
+  turn_logs:
+    driver: local
+  nginx_lb_config:
+    driver: local
+  app_logs:
+    driver: local
+  fluentd_config:
+    driver: local

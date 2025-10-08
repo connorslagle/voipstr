@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # Main VOIP application
+  voip-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: nostr-voip-app
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - VITE_DEFAULT_RELAY=wss://relay.nostr.band
+      - VITE_STUN_SERVER=stun:stun.l.google.com:19302
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - voip-network
+
+  # Optional: Redis for caching (future enhancement)
+  redis:
+    image: redis:7-alpine
+    container_name: nostr-voip-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - voip-network
+    profiles:
+      - redis
+
+  # Optional: TURN server for restrictive networks (coturn)
+  turn-server:
+    image: instrumentisto/coturn:latest
+    container_name: nostr-voip-turn
+    ports:
+      - "3478:3478/udp"   # STUN/TURN UDP
+      - "3478:3478/tcp"   # STUN/TURN TCP
+      - "5349:5349/tcp"   # TURN TLS
+      - "5349:5349/udp"   # TURN TLS UDP
+      - "49152-65535:49152-65535/udp"  # TURN relay port range
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf
+    environment:
+      - TURN_USERNAME=voip-user
+      - TURN_CREDENTIAL=voip-secret
+      - REALM=nostr-voip
+    restart: unless-stopped
+    networks:
+      - voip-network
+    profiles:
+      - turn
+
+  # Optional: Nostr relay for local development
+  nostr-relay:
+    image: scsibug/nostr-rs-relay:latest
+    container_name: nostr-voip-relay
+    ports:
+      - "7777:7777"
+    volumes:
+      - nostr_relay_data:/app/db
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
+    networks:
+      - voip-network
+    profiles:
+      - relay
+
+networks:
+  voip-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
+  nostr_relay_data:
+    driver: local

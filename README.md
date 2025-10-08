@@ -102,27 +102,91 @@ The built files will be in the `dist/` directory.
 
 ## Deployment
 
+### Quick Start with Docker
+
+The easiest way to get started is using Docker:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-username/nostr-voip.git
+cd nostr-voip
+
+# 2. Run setup script
+./scripts/docker-setup.sh
+
+# 3. Start development environment
+docker-compose -f docker-compose.dev.yml up --build
+
+# OR start production environment
+docker-compose up --build -d
+```
+
+### Docker Deployment Options
+
+#### Development Environment
+```bash
+# Development with hot-reload and local services
+docker-compose -f docker-compose.dev.yml up --build
+
+# Access: http://localhost:5173
+# Includes: Nostr relay (ws://localhost:7777), TURN server
+```
+
+#### Production Environment
+```bash
+# Production with optimized build
+docker-compose up --build -d
+
+# Access: http://localhost:8080
+# Health check: http://localhost:8080/health
+```
+
+#### With Optional Services
+```bash
+# Production with Redis cache and TURN server
+docker-compose --profile redis --profile turn up --build -d
+```
+
+### Docker Compose Services
+
+| Service | Port | Description | Profile |
+|----------|-------|-------------|---------|
+| voip-app | 8080 | Main VOIP application | Default |
+| redis | 6379 | Redis cache (optional) | redis |
+| turn-server | 3478/udp, 5349/tcp | TURN/STUN server (optional) | turn |
+| nostr-relay | 7777 | Local Nostr relay (dev only) | relay |
+
 ### Start9 Server
 
 This application is designed to run well on Start9 servers:
 
-1. **Build the application**:
+1. **Using Docker (recommended)**:
 ```bash
+# Build and run on Start9
+docker-compose up --build -d
+
+# Configure through Start9 UI
+# Access via Start9 service proxy
+```
+
+2. **Manual deployment**:
+```bash
+# Build the application
 npm run build
 ```
 
-2. **Serve with a web server** (nginx example):
+3. **Serve with a web server** (nginx example):
 ```nginx
 server {
     listen 80;
     server_name your-domain.com;
     root /path/to/dist;
     index index.html;
-    
+
     location / {
         try_files $uri $uri/ /index.html;
     }
-    
+
     # WebRTC requires HTTPS and specific headers
     location / {
         add_header 'Access-Control-Allow-Origin' '*';
@@ -132,11 +196,11 @@ server {
 }
 ```
 
-3. **Configure HTTPS** (required for WebRTC):
+4. **Configure HTTPS** (required for WebRTC):
 - Use Let's Encrypt or other SSL certificate
 - WebRTC will not work on HTTP (except localhost)
 
-### Docker Deployment
+### Manual Docker Build
 
 ```dockerfile
 FROM node:18-alpine as builder
@@ -169,11 +233,23 @@ For local network usage (phones, tablets, computers):
 Create a `.env` file for configuration:
 
 ```env
+# Application Settings
+NODE_ENV=development
+VITE_APP_NAME=Nostr VOIP
+VITE_APP_VERSION=1.0.0
+
+# Nostr Configuration
 VITE_DEFAULT_RELAY=wss://relay.nostr.band
+VITE_FOLLOWS_RELAY=wss://relay.damus.io
+
+# WebRTC Configuration
 VITE_STUN_SERVER=stun:stun.l.google.com:19302
 VITE_TURN_SERVER=turn:your-turn-server:3478
 VITE_TURN_USERNAME=your-username
 VITE_TURN_CREDENTIAL=your-credential
+
+# Docker Settings (optional)
+COMPOSE_PROJECT_NAME=nostr-voip
 ```
 
 ### Custom Relays
@@ -187,6 +263,22 @@ Recommended relays:
 - `wss://relay.nostr.band`
 - `wss://relay.damus.io`
 - `wss://nos.lol`
+
+### Docker Environment Variables
+
+When using Docker, you can override environment variables:
+
+```bash
+# Development
+docker-compose -f docker-compose.dev.yml up --build \
+  -e VITE_DEFAULT_RELAY=ws://nostr-relay:7777 \
+  -e VITE_STUN_SERVER=stun:stun.l.google.com:19302
+
+# Production
+docker-compose up --build -d \
+  -e NODE_ENV=production \
+  -e VITE_DEFAULT_RELAY=wss://relay.nostr.band
+```
 
 ## Technical Details
 
@@ -251,6 +343,129 @@ The ultimate goal includes an AI-powered secretary that can:
 - Test thoroughly across browsers
 - Update documentation as needed
 - Respect the existing code style
+
+## Docker Development
+
+### Development Setup
+
+```bash
+# 1. Clone and setup
+git clone https://github.com/your-username/nostr-voip.git
+cd nostr-voip
+./scripts/docker-setup.sh
+
+# 2. Development with hot-reload
+docker-compose -f docker-compose.dev.yml up --build
+
+# 3. Access application
+# Frontend: http://localhost:5173
+# Nostr Relay: ws://localhost:7777
+# TURN Server: turn:localhost:3478
+```
+
+### Production Build
+
+```bash
+# Build production image
+docker build -t nostr-voip:latest .
+
+# Test production container
+docker run -p 8080:8080 --rm nostr-voip:latest
+
+# Or use docker-compose
+docker-compose up --build -d
+```
+
+### Docker Commands Cheat Sheet
+
+```bash
+# Build and start development
+docker-compose -f docker-compose.dev.yml up --build
+
+# Start production services
+docker-compose up --build -d
+
+# View logs
+docker-compose logs -f voip-app
+
+# Stop all services
+docker-compose down
+
+# Remove volumes (complete reset)
+docker-compose down -v
+
+# Clean up unused images
+docker image prune -f
+
+# Access container shell
+docker exec -it nostr-voip-app sh
+
+# Check service health
+curl http://localhost:8080/health
+```
+
+### Local Network Deployment
+
+For local network usage (phones, tablets, computers on same network):
+
+```bash
+# 1. Build application
+docker build -t nostr-voip:local .
+
+# 2. Run on local machine
+docker run -d \
+  --name nostr-voip-local \
+  -p 8080:8080 \
+  -e VITE_DEFAULT_RELAY=wss://relay.nostr.band \
+  nostr-voip:local
+
+# 3. Find your local IP
+ip addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1
+
+# 4. Access from other devices
+# http://your-local-ip:8080
+```
+
+### Start9 Server Deployment
+
+For Start9 server deployment:
+
+```bash
+# 1. SSH into Start9 server
+ssh your-start9-server
+
+# 2. Clone repository
+git clone https://github.com/your-username/nostr-voip.git
+cd nostr-voip
+
+# 3. Setup and start
+./scripts/docker-setup.sh
+docker-compose up --build -d
+
+# 4. Configure through Start9 UI
+# Add as web service with port 8080
+```
+
+### Docker Compose Profiles
+
+Use profiles to start specific services:
+
+```bash
+# Development only (app + relay + TURN)
+docker-compose -f docker-compose.dev.yml up --build
+
+# Production only (app only)
+docker-compose up --build -d
+
+# Production with Redis cache
+docker-compose --profile redis up --build -d
+
+# Production with TURN server
+docker-compose --profile turn up --build -d
+
+# All services
+docker-compose --profile redis --profile turn up --build -d
+```
 
 ## Testing
 

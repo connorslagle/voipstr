@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # Development VOIP application with hot-reload
+  voip-app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: development
+    container_name: nostr-voip-dev
+    ports:
+      - "5173:5173"  # Vite dev server
+      - "6006:6006"  # React DevTools (optional)
+    environment:
+      - NODE_ENV=development
+      - VITE_DEFAULT_RELAY=ws://nostr-relay:7777
+      - VITE_STUN_SERVER=stun:stun.l.google.com:19302
+      - VITE_TURN_SERVER=turn:turn-server:3478
+      - VITE_TURN_USERNAME=voip-user
+      - VITE_TURN_CREDENTIAL=voip-secret
+    volumes:
+      - .:/app:cached
+      - /app/node_modules
+      - /app/dist
+    restart: unless-stopped
+    depends_on:
+      - nostr-relay
+      - turn-server
+    networks:
+      - voip-dev-network
+
+  # Local Nostr relay for development
+  nostr-relay:
+    image: scsibug/nostr-rs-relay:latest
+    container_name: nostr-voip-relay-dev
+    ports:
+      - "7777:7777"
+    volumes:
+      - nostr_relay_dev_data:/app/db
+    environment:
+      - RUST_LOG=debug
+      - DATABASE_URL=sqlite:///app/db/nostr.db
+    restart: unless-stopped
+    networks:
+      - voip-dev-network
+
+  # TURN server for development
+  turn-server:
+    image: instrumentisto/coturn:latest
+    container_name: nostr-voip-turn-dev
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/tcp"
+      - "5349:5349/udp"
+      - "49152-65535:49152-65535/udp"
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf
+    environment:
+      - TURN_USERNAME=voip-user
+      - TURN_CREDENTIAL=voip-secret
+      - REALM=nostr-voip-dev
+    command: >
+      /bin/sh -c "
+        echo 'user=voip-user:voip-secret' > /tmp/turnusers.txt &&
+        echo 'realm=nostr-voip-dev' >> /tmp/turnusers.txt &&
+        turnserver -c /etc/coturn/turnserver.conf --userdb=/tmp/turnusers.txt
+      "
+    restart: unless-stopped
+    networks:
+      - voip-dev-network
+
+networks:
+  voip-dev-network:
+    driver: bridge
+
+volumes:
+  nostr_relay_dev_data:
+    driver: local
